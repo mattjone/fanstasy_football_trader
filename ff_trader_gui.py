@@ -30,7 +30,7 @@ Tier2Coeff = 0.6
 
 BenchCoeff = 0.2
 
-TotalRosterSize = 16
+TotalRosterSize = 14
 
 RELATIVE_VALUES = False; #Make all values relative to best available free agent
 
@@ -79,12 +79,21 @@ def readInCSV(path):
 
             jHasNF = row[indHasNF]
             jValue = 0;
+
+            try:
+                jNfProjPts = float(row[indNfProjPts])
+            except:
+                jNfProjPts = 0; #No NF data
+            jValue = getValue( 0, 0, jNfProjPts); #Debug: ranks not currently used
+
+            """
             if jHasNF == "TRUE":
                 jNfRank = int(row[indNfRank])
                 jNfProjPts = float(row[indNfProjPts])
                 jValue = getValue( jRank, jNfRank, jNfProjPts );
             else:
                 jValue = getBasicValue( jRank, jPercOwned );
+            """
 
             jplayer = {}
             jplayer["ID"] = jID;
@@ -162,7 +171,7 @@ def getValue( Rank, NfRank, NfProjPts ):
     adjRank2 = (max(41-NfRank,0)/4)**2;
     value = (adjRank1 + 3*adjRank2)/4 + NfProjPts
     """
-    value = NfProjPts/5
+    value = NfProjPts
     return value
 
 def getBasicValue(Rank,PercentOwned):
@@ -239,7 +248,6 @@ def findTrade(myRoster, otherRoster, FreeAgents):
 
     Improvement = (TeamValue["Team1"] - PrevTeamValue["Team1"]) + (TeamValue["Team2"] - PrevTeamValue["Team2"])
 
-    TradeModel.setObjective(Improvement, GRB.MAXIMIZE)
 
     """
     #Assign each player to exactly 1 team
@@ -287,21 +295,30 @@ def findTrade(myRoster, otherRoster, FreeAgents):
 
 
     #Max number of players to trade away
+    TotalNumPlayersTradedAway = 0
     for team in ["Team1","Team2"]:
         numPlayersTradedAway = 0
         for pos in Positions:
             numPlayersTradedAway += quicksum( Roster[team][pos][i]*(1 - Select[team][pos][i]) for i in range(NumPlayersByPos[pos]))
 
         TradeModel.addConstr( numPlayersTradedAway <= 3 )
+        TotalNumPlayersTradedAway += numPlayersTradedAway
         #TODO: Make above an option on GUI (at most 2 players maybe)
 
     #Trade beneficial to both teams
     TradeModel.addConstr(TeamValue["Team1"] >= PrevTeamValue["Team1"])
     TradeModel.addConstr(TeamValue["Team2"] >= PrevTeamValue["Team2"])
 
+
     #Only add FreeAgent if the team has less than the required number of players
     for team in ["Team1","Team2"]:
         TradeModel.addConstr(AddFA[team] <= TotalRosterSize - quicksum(sum(Select[team][pos][i] for i in range(NumPlayersByPos[pos])) for pos in Positions))
+
+    w=0.01 #Mess with this
+    objective = Improvement - w*TotalNumPlayersTradedAway;
+    TradeModel.setObjective(objective, GRB.MAXIMIZE)
+
+
 
     #### OPTIMIZE AND PRINT RESULTS
     TradeModel.optimize()
