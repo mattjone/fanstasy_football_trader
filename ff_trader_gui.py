@@ -32,7 +32,7 @@ BenchCoeff = 0.2
 
 TotalRosterSize = 16
 
-RELATIVE_VALUES = True; #Make all values relative to best available free agent
+RELATIVE_VALUES = False; #Make all values relative to best available free agent
 
 def readInCSV(path):
     with open(path, "rU") as f:
@@ -126,6 +126,17 @@ def readInCSV(path):
 
     return (Rosters, FreeAgents, FantasyTeams)
 
+def findTopFreeAgent(FreeAgents):
+    topFA = {}
+    for pos in FreeAgents:
+        for player in FreeAgents[pos]:
+            if(topFA == {}):
+                topFA = player
+            elif(topFA and player["Value"] > topFA["Value"]):
+                print("test")
+                topFA = player
+    return topFA
+
 def submitRatings():
     ##This will be the command called when the user submits rankings
     print("This will be the command called when the user submits rankings")
@@ -173,7 +184,7 @@ def iterateTeams(myTeam, Rosters, FreeAgents, FantasyTeams):
         if otherTeam == myTeam:
             continue;
 
-        findTrade(Rosters[myTeam], Rosters[otherTeam])
+        findTrade(Rosters[myTeam], Rosters[otherTeam], FreeAgents)
         """
         #TODO: how are these trades stored? what is being returned?
         #TODO: be able to get multiple trades per team
@@ -183,17 +194,19 @@ def iterateTeams(myTeam, Rosters, FreeAgents, FantasyTeams):
         """
     return TradeProposals
 
-def findTrade(myRoster, otherRoster):
+def findTrade(myRoster, otherRoster, FreeAgents):
     (AllNames, AllValues, UserVals, Roster, NumPlayersByPos) = stackTeams(myRoster, otherRoster)
 
     PrevTeamValue = getTeamValue(myRoster, otherRoster)
-
+    topFA = findTopFreeAgent(FreeAgents)
+    print(topFA)
     ##Create model
     TradeModel = Model("Trade Test Model")
 
     Select = {}
     Starter = {}
     Tier2 = {}
+    AddFA = {}
     for team in ["Team1","Team2"]:
         Select[team] = {}
         Starter[team] = {}
@@ -205,7 +218,8 @@ def findTrade(myRoster, otherRoster):
             for i in range(NumPlayersByPos[pos]):
                 Select[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Select_" + team + "_" + pos + "_" + str(i)) )
                 Starter[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Starter_" + team + "_" + pos + "_" + str(i)) )
-                Tier2[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Teir2_" + team + "_" + pos + "_" + str(i)) )
+                Tier2[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Tier2_" + team + "_" + pos + "_" + str(i)) )
+        AddFA[team] = TradeModel.addVar(vtype = GRB.BINARY, name = "FreeAgentPickup_" + team)
 
     TradeModel.update()
     TradeModel.setParam('OutputFlag',False) #stfu
@@ -223,6 +237,7 @@ def findTrade(myRoster, otherRoster):
                     UserVal = 1 #Assume other people value consensus
                 TeamValue[team] += UserVal * Select[team][pos][i] * AllValues[pos][i] * \
                     (BenchCoeff + (StarterCoeff-BenchCoeff)*Starter[team][pos][i] + (Tier2Coeff-BenchCoeff)*Tier2[team][pos][i])
+        TeamValue[team] += AddFA[team]*topFA["Value"]
 
     Improvement = (TeamValue["Team1"] - PrevTeamValue["Team1"]) + (TeamValue["Team2"] - PrevTeamValue["Team2"])
 
@@ -285,6 +300,10 @@ def findTrade(myRoster, otherRoster):
     #Trade beneficial to both teams
     TradeModel.addConstr(TeamValue["Team1"] >= PrevTeamValue["Team1"])
     TradeModel.addConstr(TeamValue["Team2"] >= PrevTeamValue["Team2"])
+
+    #Only add FreeAgent if the team has less than the required number of players
+    for team in ["Team1","Team2"]:
+        TradeModel.addConstr(AddFA[team] <= quicksum(sum(Select[team][pos]) for pos in Positions) - TotalRosterSize)
 
     #### OPTIMIZE AND PRINT RESULTS
     TradeModel.optimize()
