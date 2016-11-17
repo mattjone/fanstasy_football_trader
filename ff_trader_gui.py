@@ -347,7 +347,8 @@ def findTrade(myRoster, otherRoster, FreeAgents):
             numPlayersTradedAway += quicksum( Roster[team][pos][i]*(1 - Select[team][pos][i]) for i in range(NumPlayersByPos[pos]))
 
         TradeModel.addConstr( numPlayersTradedAway <= 3 )
-        TotalNumPlayersTradedAway += numPlayersTradedAway + sum(AddFA[team][pos] for pos in Positions)
+        TradeModel.addConstr( numPlayersTradedAway >= 1)
+        TotalNumPlayersTradedAway += numPlayersTradedAway
         #TODO: Make above an option on GUI (at most 2 players maybe)
 
     #Trade beneficial to both teams
@@ -380,8 +381,13 @@ def findTrade(myRoster, otherRoster, FreeAgents):
         for i in range(NumPlayersByPos[pos]):
             TradeModel.addConstr( Roster[team][pos][i] == Select[team][pos][i] )
 
+    FAadds=0
+    for team in ["Team1","Team2"]:
+        FAadds += sum(AddFA[team][pos] for pos in Positions);
+
     w=0.01 #Mess with this
-    objective = Improvement - w*TotalNumPlayersTradedAway;
+    w2=0.05
+    objective = Improvement - w*TotalNumPlayersTradedAway - w2*FAadds;
     TradeModel.setObjective(objective, GRB.MAXIMIZE)
 
 
