@@ -30,9 +30,10 @@ Tier2Coeff = 0.6
 
 BenchCoeff = 0.2
 
-TotalRosterSize = 14
+TotalRosterSize = 0
 
 RELATIVE_VALUES = False; #Make all values relative to best available free agent
+VERBOSE = False;
 
 def readInCSV(path):
     with open(path, "rU") as f:
@@ -120,6 +121,17 @@ def readInCSV(path):
 
                 Rosters[jFantasyTeam][jPos].append(jplayer)
 
+    #Get total roster size
+    max_team_size=0
+    for team in FantasyTeams:
+        j_team_size=0
+        for pos in Positions:
+            j_team_size+=len(Rosters[team][pos])
+        max_team_size = max(max_team_size,j_team_size)
+
+    global TotalRosterSize
+    TotalRosterSize = max_team_size
+
     if RELATIVE_VALUES:
         #find highest value of free agents at each position
         BestFreeAgentValue = {}
@@ -135,14 +147,15 @@ def readInCSV(path):
 
     return (Rosters, FreeAgents, FantasyTeams)
 
-def findTopFreeAgent(FreeAgents):
+def findTopFreeAgent(Positions):
     topFA = {}
     for pos in FreeAgents:
+        topFA[pos] = None
         for player in FreeAgents[pos]:
-            if(topFA == {}):
-                topFA = player
-            elif(topFA and player["Value"] > topFA["Value"]):
-                topFA = player
+            if(topFA[pos] == None):
+                topFA[pos] = player
+            elif(player["Value"] > topFA[pos]["Value"]):
+                topFA[pos] = player
     return topFA
 
 def submitRatings():
@@ -192,6 +205,7 @@ def iterateTeams(myTeam, Rosters, FreeAgents, FantasyTeams):
         if otherTeam == myTeam:
             continue;
 
+        print "\n\n\nTRADES WITH %s"%otherTeam
         findTrade(Rosters[myTeam], Rosters[otherTeam], FreeAgents)
         """
         #TODO: how are these trades stored? what is being returned?
@@ -200,6 +214,8 @@ def iterateTeams(myTeam, Rosters, FreeAgents, FantasyTeams):
         for jTrade in jTrades:
             TradeProposals.append(jTrade.extend(otherTeam))
         """
+    print "\nDONE!!"
+
     return TradeProposals
 
 def findTrade(myRoster, otherRoster, FreeAgents):
@@ -213,25 +229,46 @@ def findTrade(myRoster, otherRoster, FreeAgents):
     Select = {}
     Starter = {}
     Tier2 = {}
+    Bench = {}
+
     AddFA = {}
+    StarterFA = {}
+    Tier2FA = {}
+    BenchFA = {}
     for team in ["Team1","Team2"]:
         Select[team] = {}
         Starter[team] = {}
         Tier2[team] = {}
-        AddFA[team] = TradeModel.addVar(vtype = GRB.BINARY, name = "FreeAgentPickup_" + team)
+        Bench[team] = {}
+
+        AddFA[team] = {}
+        StarterFA[team] = {}
+        Tier2FA[team] = {}
+        BenchFA[team] = {}
         for pos in Positions:
             Select[team][pos] = []
             Starter[team][pos] = []
             Tier2[team][pos] = []
+            Bench[team][pos] = []
+
+            #AddFA[team][pos] = TradeModel.addVar(vtype = GRB.BINARY, name = "FreeAgentPickup_" + team+"_"+pos)
+            StarterFA[team][pos] = TradeModel.addVar(vtype = GRB.BINARY, name = "FreeAgentStarter_" + team+"_"+pos)
+            Tier2FA[team][pos] = TradeModel.addVar(vtype = GRB.BINARY, name = "FreeAgentTier2_" + team+"_"+pos)
+            BenchFA[team][pos] = TradeModel.addVar(vtype = GRB.BINARY, name = "FreeAgentBench_" + team+"_"+pos)
+
+            AddFA[team][pos] = StarterFA[team][pos] + Tier2FA[team][pos] + BenchFA[team][pos]
             for i in range(NumPlayersByPos[pos]):
-                Select[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Select_" + team + "_" + pos + "_" + str(i)) )
+                #Select[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Select_" + team + "_" + pos + "_" + str(i)) )
                 Starter[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Starter_" + team + "_" + pos + "_" + str(i)) )
                 Tier2[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Tier2_" + team + "_" + pos + "_" + str(i)) )
+                Bench[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Bench_" + team + "_" + pos + "_" + str(i)) )
+
+                Select[team][pos].append( Starter[team][pos][i] + Tier2[team][pos][i] + Bench[team][pos][i] )
 
     TradeModel.update()
     TradeModel.setParam('OutputFlag',False) #stfu
 
-
+    FADiscount = 0.6
     #Calculate adjusted team value
     TeamValue = {}
     for team in ["Team1","Team2"]:
@@ -242,9 +279,16 @@ def findTrade(myRoster, otherRoster, FreeAgents):
                     UserVal = UserVals[pos][i]
                 else:
                     UserVal = 1 #Assume other people value consensus
-                TeamValue[team] += UserVal * Select[team][pos][i] * AllValues[pos][i] * \
-                    (BenchCoeff + (StarterCoeff-BenchCoeff)*Starter[team][pos][i] + (Tier2Coeff-BenchCoeff)*Tier2[team][pos][i])
-        TeamValue[team] += AddFA[team]*topFA["Value"]
+                #TeamValue[team] += UserVal * Select[team][pos][i] * AllValues[pos][i] * \
+                #    (BenchCoeff + (StarterCoeff-BenchCoeff)*Starter[team][pos][i] + (Tier2Coeff-BenchCoeff)*Tier2[team][pos][i])
+                TeamValue[team] += UserVal * AllValues[pos][i] * \
+                    (BenchCoeff*Bench[team][pos][i] + StarterCoeff*Starter[team][pos][i] + Tier2Coeff*Tier2[team][pos][i])
+
+            #TeamValue[team] += FADiscount * AddFA[team][pos] * topFA[pos]["Value"] * \
+            #    (BenchCoeff + (StarterCoeff-BenchCoeff)*StarterFA[team][pos] + (Tier2Coeff-BenchCoeff)*Tier2FA[team][pos])
+            TeamValue[team] += FADiscount * topFA[pos]["Value"] * \
+                (BenchCoeff*BenchFA[team][pos] + StarterCoeff*StarterFA[team][pos] + Tier2Coeff*Tier2FA[team][pos])
+        #TeamValue[team] += AddFA[team]*topFA["Value"]
 
     Improvement = (TeamValue["Team1"] - PrevTeamValue["Team1"]) + (TeamValue["Team2"] - PrevTeamValue["Team2"])
 
@@ -260,7 +304,7 @@ def findTrade(myRoster, otherRoster, FreeAgents):
     for pos in Positions:
         for i in range(NumPlayersByPos[pos]):
             TradeModel.addConstr( Select["Team1"][pos][i] + Select["Team2"][pos][i] <= 1)
-
+    """
     #Starter only if selected
     for team in ["Team1","Team2"]:
         for pos in Positions:
@@ -272,6 +316,7 @@ def findTrade(myRoster, otherRoster, FreeAgents):
         for pos in Positions:
             for i in range(NumPlayersByPos[pos]):
                 TradeModel.addConstr( Tier2[team][pos][i] <= Select[team][pos][i])
+    """
 
     #Number of starters at each position
     for team in ["Team1","Team2"]:
@@ -283,11 +328,11 @@ def findTrade(myRoster, otherRoster, FreeAgents):
         for pos in Positions:
             TradeModel.addConstr( quicksum(Tier2[team][pos]) <= NumTier2[pos] )
 
-    #Cannot simultaneous start and be tier2
+    #Cannot simultaneous start and be tier2 and bench
     for team in ["Team1","Team2"]:
         for pos in Positions:
             for i in range(NumPlayersByPos[pos]):
-                TradeModel.addConstr( Tier2[team][pos][i] + Starter[team][pos][i] <= 1 )
+                TradeModel.addConstr( Tier2[team][pos][i] + Starter[team][pos][i] + Bench[team][pos][i] <= 1 )
 
     #Total roster size
     for team in ["Team1","Team2"]:
@@ -302,7 +347,7 @@ def findTrade(myRoster, otherRoster, FreeAgents):
             numPlayersTradedAway += quicksum( Roster[team][pos][i]*(1 - Select[team][pos][i]) for i in range(NumPlayersByPos[pos]))
 
         TradeModel.addConstr( numPlayersTradedAway <= 3 )
-        TotalNumPlayersTradedAway += numPlayersTradedAway
+        TotalNumPlayersTradedAway += numPlayersTradedAway + sum(AddFA[team][pos] for pos in Positions)
         #TODO: Make above an option on GUI (at most 2 players maybe)
 
     #Trade beneficial to both teams
@@ -312,7 +357,28 @@ def findTrade(myRoster, otherRoster, FreeAgents):
 
     #Only add FreeAgent if the team has less than the required number of players
     for team in ["Team1","Team2"]:
-        TradeModel.addConstr(AddFA[team] <= TotalRosterSize - quicksum(sum(Select[team][pos][i] for i in range(NumPlayersByPos[pos])) for pos in Positions))
+        #Total number of FAs picked up is less than number of open slots
+        TradeModel.addConstr(quicksum(AddFA[team][pos] for pos in Positions) <= \
+            TotalRosterSize - quicksum(sum(Select[team][pos]) for pos in Positions))
+        for pos in Positions:
+            #Added FA is starter only if there are starter slots available
+            TradeModel.addConstr( StarterFA[team][pos] == NumStarters[pos] - quicksum(Starter[team][pos]) )
+            #Added FA is Tier 2 only if there are starter slots available
+            TradeModel.addConstr( Tier2FA[team][pos] <= NumTier2[pos] - quicksum(Tier2[team][pos]) )
+            #Added FA is not starter and tier 2 simultaneously; and only if we are adding a FA
+            TradeModel.addConstr( AddFA[team][pos] <= 1)
+
+    #Don't let both players pick up same person
+    for pos in Positions:
+        TradeModel.addConstr( AddFA["Team1"][pos] + AddFA["Team2"][pos] <= 1 )
+
+    for team in ["Team1","Team2"]:
+        pos = "K"
+        for i in range(NumPlayersByPos[pos]):
+            TradeModel.addConstr( Roster[team][pos][i] == Select[team][pos][i] )
+        pos = "D/ST"
+        for i in range(NumPlayersByPos[pos]):
+            TradeModel.addConstr( Roster[team][pos][i] == Select[team][pos][i] )
 
     w=0.01 #Mess with this
     objective = Improvement - w*TotalNumPlayersTradedAway;
@@ -331,47 +397,73 @@ def findTrade(myRoster, otherRoster, FreeAgents):
     PostTeamValue["Team2"] = 0;
     for pos in Positions:
         for i in range(NumPlayersByPos[pos]):
-            if Roster["Team1"][pos][i] == 1 and Select["Team1"][pos][i].X == 0:
+            #if Roster["Team1"][pos][i] == 1 and Select["Team1"][pos][i].X == 0:
+            if Roster["Team1"][pos][i] == 1 and Select["Team1"][pos][i].getValue() == 0:
                 #Look for a drop - other team doesn't own now either
-                if Select["Team2"][pos][i].X == 0:
-                    print "\t%s: %f DROP \t[%s]"%(pos,AllValues[pos][i],AllNames[pos][i])
+                if Select["Team2"][pos][i].getValue() == 0:
+                    print "\t%s: %0.02f DROP \t[%s]"%(pos,AllValues[pos][i],AllNames[pos][i])
 
                 else:
-                    print "\t%s: %f\t[%s]"%(pos,AllValues[pos][i],AllNames[pos][i])
+                    print "\t%s: %0.02f\t[%s]"%(pos,AllValues[pos][i],AllNames[pos][i])
 
-            if Select["Team1"][pos][i].X == 1:
-                if Starter["Team1"][pos][i].X:
-                    PostTeamValue["Team1"] += AllValues[pos][i]*StarterCoeff
-                elif Tier2["Team1"][pos][i].X:
-                    PostTeamValue["Team1"] += AllValues[pos][i]*Tier2Coeff
-                else:
-                    PostTeamValue["Team1"] += AllValues[pos][i]*BenchCoeff
+            #if Select["Team1"][pos][i].X == 1:
+            #if Select["Team1"][pos][i].getValue() == 1:
+            if Starter["Team1"][pos][i].X:
+                PostTeamValue["Team1"] += AllValues[pos][i]*StarterCoeff
+            elif Tier2["Team1"][pos][i].X:
+                PostTeamValue["Team1"] += AllValues[pos][i]*Tier2Coeff
+            elif Bench["Team1"][pos][i].X:
+                PostTeamValue["Team1"] += AllValues[pos][i]*BenchCoeff
+
+
+    for pos in Positions:
+        if AddFA["Team1"][pos].getValue():
+            print "\t%s: %0.02f\t[FA: %s]"%(pos,topFA[pos]["Value"],topFA[pos]["Name"])
+            if StarterFA["Team1"][pos].X:
+                PostTeamValue["Team1"] += FADiscount * topFA[pos]["Value"] * StarterCoeff
+            elif Tier2FA["Team1"][pos].X:
+                PostTeamValue["Team1"] += FADiscount * topFA[pos]["Value"] * Tier2Coeff
+            elif BenchFA["Team1"][pos].X:
+                PostTeamValue["Team1"] += FADiscount * topFA[pos]["Value"] * AllValues[pos]*BenchCoeff
+
 
     print 'TEAM 2 Trading Away:'
     for pos in Positions:
         for i in range(NumPlayersByPos[pos]):
-            if Roster["Team2"][pos][i] == 1 and Select["Team2"][pos][i].X == 0:
+            #if Roster["Team2"][pos][i] == 1 and Select["Team2"][pos][i].X == 0:
+            if Roster["Team2"][pos][i] == 1 and Select["Team2"][pos][i].getValue() == 0:
                 #Look for a drop - other team doesn't own now either
-                if Select["Team1"][pos][i].X == 0:
+                #if Select["Team1"][pos][i].X == 0:
+                if Select["Team1"][pos][i].getValue() == 0:
                     print "\t%s: %f DROP \t[%s]"%(pos,AllValues[pos][i],AllNames[pos][i])
                 else:
                     print "\t%s: %f\t[%s]"%(pos,AllValues[pos][i],AllNames[pos][i])
-            if Select["Team2"][pos][i].X == 1:
+            #if Select["Team2"][pos][i].X == 1:
+            if Select["Team2"][pos][i].getValue() == 1:
                 if Starter["Team2"][pos][i].X:
                     PostTeamValue["Team2"] += AllValues[pos][i]*StarterCoeff
                 elif Tier2["Team2"][pos][i].X:
                     PostTeamValue["Team2"] += AllValues[pos][i]*Tier2Coeff
                 else:
                     PostTeamValue["Team2"] += AllValues[pos][i]*BenchCoeff
+    for pos in Positions:
+        if AddFA["Team2"][pos].getValue():
+            print "\t%s: %0.02f\t[FA: %s]"%(pos,topFA[pos]["Value"],topFA[pos]["Name"])
 
     print "\nStarting team values:\n\t\t%f\t%f"%(PrevTeamValue["Team1"],PrevTeamValue["Team2"])
-    print "\nEnding team values:\n\t\t%f\t%f"%(PostTeamValue["Team1"],PostTeamValue["Team2"])
-    for pos in Positions:
-        print pos+":"
-        for i in range(NumPlayersByPos[pos]):
-            print("\t%f: \t%i (%i)"%(AllValues[pos][i],Select["Team1"][pos][i].X, Starter["Team1"][pos][i].X) ),
-            print("\t %i (%i)\t[%s]"%(Select["Team2"][pos][i].X, Starter["Team2"][pos][i].X, AllNames[pos][i]) ),
-            print "" #newline
+    print "\nEnding team values:\n\t\t%f\t%f"%(TeamValue["Team1"].getValue(),TeamValue["Team2"].getValue())
+
+    print "\nTOTAL IMPROVEMENT = %0.02f"%(TeamValue["Team1"].getValue() + TeamValue["Team2"].getValue() - \
+        (PrevTeamValue["Team1"]+PrevTeamValue["Team2"]) )
+    if VERBOSE:
+        for pos in Positions:
+            print pos+":"
+            for i in range(NumPlayersByPos[pos]):
+                #print("\t%f: \t%i (%i)"%(AllValues[pos][i],Select["Team1"][pos][i].X, Starter["Team1"][pos][i].X) ),
+                print("\t%f: \t%i (%i)"%(AllValues[pos][i],Select["Team1"][pos][i].getValue(), Starter["Team1"][pos][i].X) ),
+                #print("\t %i (%i)\t[%s]"%(Select["Team2"][pos][i].X, Starter["Team2"][pos][i].X, AllNames[pos][i]) ),
+                print("\t %i (%i)\t[%s]"%(Select["Team2"][pos][i].getValue(), Starter["Team2"][pos][i].X, AllNames[pos][i]) ),
+                print "" #newline
 
 def stackTeams(myRoster, otherRoster):
     ##Stack all values per position
@@ -448,7 +540,7 @@ def getTeamValue(myRoster, otherRoster):
 args = sys.argv[1:] #strip script name from args
 #TODO: handle custom arguments
 if len(args)<1:
-    csvPath = "data.csv"
+    csvPath = "data_11_16.csv"
 else:
     csvPath = args[0]
 
