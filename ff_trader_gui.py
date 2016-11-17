@@ -133,7 +133,6 @@ def findTopFreeAgent(FreeAgents):
             if(topFA == {}):
                 topFA = player
             elif(topFA and player["Value"] > topFA["Value"]):
-                print("test")
                 topFA = player
     return topFA
 
@@ -199,7 +198,6 @@ def findTrade(myRoster, otherRoster, FreeAgents):
 
     PrevTeamValue = getTeamValue(myRoster, otherRoster)
     topFA = findTopFreeAgent(FreeAgents)
-    print(topFA)
     ##Create model
     TradeModel = Model("Trade Test Model")
 
@@ -211,6 +209,7 @@ def findTrade(myRoster, otherRoster, FreeAgents):
         Select[team] = {}
         Starter[team] = {}
         Tier2[team] = {}
+        AddFA[team] = TradeModel.addVar(vtype = GRB.BINARY, name = "FreeAgentPickup_" + team)
         for pos in Positions:
             Select[team][pos] = []
             Starter[team][pos] = []
@@ -219,7 +218,6 @@ def findTrade(myRoster, otherRoster, FreeAgents):
                 Select[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Select_" + team + "_" + pos + "_" + str(i)) )
                 Starter[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Starter_" + team + "_" + pos + "_" + str(i)) )
                 Tier2[team][pos].append( TradeModel.addVar(vtype = GRB.BINARY, name = "Tier2_" + team + "_" + pos + "_" + str(i)) )
-        AddFA[team] = TradeModel.addVar(vtype = GRB.BINARY, name = "FreeAgentPickup_" + team)
 
     TradeModel.update()
     TradeModel.setParam('OutputFlag',False) #stfu
@@ -303,7 +301,7 @@ def findTrade(myRoster, otherRoster, FreeAgents):
 
     #Only add FreeAgent if the team has less than the required number of players
     for team in ["Team1","Team2"]:
-        TradeModel.addConstr(AddFA[team] <= quicksum(sum(Select[team][pos]) for pos in Positions) - TotalRosterSize)
+        TradeModel.addConstr(AddFA[team] <= TotalRosterSize - quicksum(sum(Select[team][pos][i] for i in range(NumPlayersByPos[pos])) for pos in Positions))
 
     #### OPTIMIZE AND PRINT RESULTS
     TradeModel.optimize()
@@ -314,7 +312,6 @@ def findTrade(myRoster, otherRoster, FreeAgents):
     PostTeamValue = {}
     PostTeamValue["Team1"] = 0;
     PostTeamValue["Team2"] = 0;
-
     for pos in Positions:
         for i in range(NumPlayersByPos[pos]):
             if Roster["Team1"][pos][i] == 1 and Select["Team1"][pos][i].X == 0:
