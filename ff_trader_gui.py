@@ -35,6 +35,8 @@ TotalRosterSize = 0
 RELATIVE_VALUES = False; #Make all values relative to best available free agent
 VERBOSE = False;
 
+UTILITARIAN = True;
+
 def readInCSV(path):
     with open(path, "rU") as f:
         csvFile = csv.reader(f)
@@ -387,10 +389,12 @@ def findTrade(myRoster, otherRoster, FreeAgents):
 
     w=0.01 #Mess with this
     w2=0.05
-    objective = Improvement - w*TotalNumPlayersTradedAway - w2*FAadds;
+    if UTILITARIAN:
+        objective = Improvement - w*TotalNumPlayersTradedAway - w2*FAadds;
+    else:
+        objective = (TeamValue["Team1"] - PrevTeamValue["Team1"]) - (w/2)*TotalNumPlayersTradedAway - (w2/2)*FAadds;
+
     TradeModel.setObjective(objective, GRB.MAXIMIZE)
-
-
 
     #### OPTIMIZE AND PRINT RESULTS
     TradeModel.optimize()
